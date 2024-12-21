@@ -1,6 +1,6 @@
 <div align="center">
 
-[English](README.md) | [简体中文](README_zh-CN.md) | 日本語
+[English](../README.md) | [简体中文](README_zh-CN.md) | 日本語
 
 <img src="./docs/images/banner.png" width="320px"  alt="PDF2ZH"/>  
 
@@ -77,7 +77,7 @@
 pdf2zhの実行には追加モデル（`wybxc/DocLayout-YOLO-DocStructBench-onnx`）が必要です。このモデルはModelScopeでも見つけることができます。起動時にこのモデルのダウンロードに問題がある場合は、以下の環境変数を使用してください：
 
 ```shell
-USE_MODELSCOPE=1 pdf2zh
+set HF_ENDPOINT=https://hf-mirror.com
 ```
 
 <h3 id="cmd">方法1. コマンドライン</h3>
@@ -99,7 +99,7 @@ USE_MODELSCOPE=1 pdf2zh
 
 Python環境を事前にインストールする必要はありません
 
-[setup.bat](https://raw.githubusercontent.com/Byaidu/PDFMathTranslate/refs/heads/main/setup.bat) をダウンロードしてダブルクリックして実行します
+[setup.bat](https://raw.githubusercontent.com/Byaidu/PDFMathTranslate/refs/heads/main/script/setup.bat) をダウンロードしてダブルクリックして実行します
 
 <h3 id="gui">方法3. GUI</h3>
 
@@ -331,6 +331,8 @@ curl http://localhost:11008/v1/translate/d9894125-2f4e-45ea-9d93-1a9068d2045a -X
 - ドキュメントの解析：[Pdfminer.six](https://github.com/pdfminer/pdfminer.six)
 
 - ドキュメントの抽出：[MinerU](https://github.com/opendatalab/MinerU)
+
+- ドキュメントプレビュー：[Gradio PDF](https://github.com/freddyaboulton/gradio-pdf)
 
 - マルチスレッド翻訳：[MathTranslate](https://github.com/SUSYUSTC/MathTranslate)
 

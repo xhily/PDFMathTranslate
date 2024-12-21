@@ -26,6 +26,7 @@ class BaseTranslator:
     name = "base"
     envs = {}
     lang_map = {}
+    CustomPrompt = False
 
     def __init__(self, lang_in, lang_out, model):
         lang_in = self.lang_map.get(lang_in.lower(), lang_in)
@@ -200,6 +201,7 @@ class OllamaTranslator(BaseTranslator):
         "OLLAMA_HOST": "http://127.0.0.1:11434",
         "OLLAMA_MODEL": "gemma2",
     }
+    CustomPrompt = True
 
     def __init__(self, lang_in, lang_out, model, envs=None, prompt=None):
         self.set_envs(envs)
@@ -211,15 +213,25 @@ class OllamaTranslator(BaseTranslator):
         self.prompttext = prompt
 
     def translate(self, text):
-        print(len(self.prompt(text, self.prompttext)))
-        print(self.prompt(text, self.prompttext)[0])
-        print(self.prompt(text, self.prompttext)[1])
-        response = self.client.chat(
-            model=self.model,
-            options=self.options,
-            messages=self.prompt(text, self.prompttext),
-        )
-        return response["message"]["content"].strip()
+        maxlen = max(2000, len(text) * 5)
+        for model in self.model.split(";"):
+            try:
+                response = ""
+                stream = self.client.chat(
+                    model=model,
+                    options=self.options,
+                    messages=self.prompt(text, self.prompttext),
+                    stream=True,
+                )
+                for chunk in stream:
+                    chunk = chunk["message"]["content"]
+                    response += chunk
+                    if len(response) > maxlen:
+                        raise Exception("Response too long")
+                return response.strip()
+            except Exception as e:
+                print(e)
+        raise Exception("All models failed")
 
 
 class OpenAITranslator(BaseTranslator):
@@ -230,6 +242,7 @@ class OpenAITranslator(BaseTranslator):
         "OPENAI_API_KEY": None,
         "OPENAI_MODEL": "gpt-4o-mini",
     }
+    CustomPrompt = True
 
     def __init__(
         self,
@@ -265,6 +278,7 @@ class AzureOpenAITranslator(BaseTranslator):
         "AZURE_OPENAI_API_KEY": None,
         "AZURE_OPENAI_MODEL": "gpt-4o-mini",
     }
+    CustomPrompt = True
 
     def __init__(
         self,
@@ -306,6 +320,7 @@ class ModelScopeTranslator(OpenAITranslator):
         "MODELSCOPE_API_KEY": None,
         "MODELSCOPE_MODEL": "Qwen/Qwen2.5-32B-Instruct",
     }
+    CustomPrompt = True
 
     def __init__(
         self,
@@ -333,6 +348,7 @@ class ZhipuTranslator(OpenAITranslator):
         "ZHIPU_API_KEY": None,
         "ZHIPU_MODEL": "glm-4-flash",
     }
+    CustomPrompt = True
 
     def __init__(self, lang_in, lang_out, model, envs=None, prompt=None):
         self.set_envs(envs)
@@ -367,6 +383,7 @@ class SiliconTranslator(OpenAITranslator):
         "SILICON_API_KEY": None,
         "SILICON_MODEL": "Qwen/Qwen2.5-7B-Instruct",
     }
+    CustomPrompt = True
 
     def __init__(self, lang_in, lang_out, model, envs=None, prompt=None):
         self.set_envs(envs)
@@ -385,6 +402,7 @@ class GeminiTranslator(OpenAITranslator):
         "GEMINI_API_KEY": None,
         "GEMINI_MODEL": "gemini-1.5-flash",
     }
+    CustomPrompt = True
 
     def __init__(self, lang_in, lang_out, model, envs=None, prompt=None):
         self.set_envs(envs)
@@ -458,6 +476,7 @@ class AnythingLLMTranslator(BaseTranslator):
         "AnythingLLM_URL": None,
         "AnythingLLM_APIKEY": None,
     }
+    CustomPrompt = True
 
     def __init__(self, lang_out, lang_in, model, envs=None, prompt=None):
         self.set_envs(envs)

@@ -1,27 +1,28 @@
 """Functions that can be used for the most common use-cases for pdf2zh.six"""
 
 import asyncio
-from asyncio import CancelledError
-from typing import BinaryIO
-import numpy as np
-import tqdm
-import sys
-from pymupdf import Font, Document
-from pdfminer.pdfpage import PDFPage
-from pdfminer.pdfinterp import PDFResourceManager
-from pdfminer.pdfdocument import PDFDocument
-from pdfminer.pdfparser import PDFParser
-from pdfminer.pdfexceptions import PDFValueError
-from pdf2zh.converter import TranslateConverter
-from pdf2zh.pdfinterp import PDFPageInterpreterEx
-from pdf2zh.doclayout import DocLayoutModel
-from pathlib import Path
-from typing import Any, List, Optional
-import urllib.request
-import requests
-import tempfile
-import os
 import io
+import os
+import sys
+import tempfile
+import urllib.request
+from asyncio import CancelledError
+from pathlib import Path
+from typing import Any, BinaryIO, List, Optional
+
+import numpy as np
+import requests
+import tqdm
+from pdfminer.pdfdocument import PDFDocument
+from pdfminer.pdfexceptions import PDFValueError
+from pdfminer.pdfinterp import PDFResourceManager
+from pdfminer.pdfpage import PDFPage
+from pdfminer.pdfparser import PDFParser
+from pymupdf import Document, Font
+
+from pdf2zh.converter import TranslateConverter
+from pdf2zh.doclayout import DocLayoutModel
+from pdf2zh.pdfinterp import PDFPageInterpreterEx
 
 model = DocLayoutModel.load_available()
 
@@ -136,7 +137,7 @@ def translate_patch(
             h, w = box.shape
             vcls = ["abandon", "figure", "table", "isolate_formula", "formula_caption"]
             for i, d in enumerate(page_layout.boxes):
-                if not page_layout.names[int(d.cls)] in vcls:
+                if page_layout.names[int(d.cls)] not in vcls:
                     x0, y0, x1, y1 = d.xyxy.squeeze()
                     x0, y0, x1, y1 = (
                         np.clip(int(x0 - 1), 0, w - 1),
@@ -187,7 +188,11 @@ def translate_stream(
         font_list.append((resfont, None))
     elif lang_out.lower() in noto_list:  # noto
         resfont = "noto"
-        ttf_path = os.path.join(tempfile.gettempdir(), "GoNotoKurrent-Regular.ttf")
+        # docker
+        ttf_path = os.environ.get("NOTO_FONT_PATH", "/app/GoNotoKurrent-Regular.ttf")
+
+        if not os.path.exists(ttf_path):
+            ttf_path = os.path.join(tempfile.gettempdir(), "GoNotoKurrent-Regular.ttf")
         if not os.path.exists(ttf_path):
             print("Downloading Noto font...")
             urllib.request.urlretrieve(
@@ -243,6 +248,55 @@ def translate_stream(
     return doc_zh.write(deflate=1), doc_en.write(deflate=1)
 
 
+def convert_to_pdfa(input_path, output_path):
+    """
+    Convert PDF to PDF/A format
+
+    Args:
+        input_path: Path to source PDF file
+        output_path: Path to save PDF/A file
+    """
+    from pikepdf import Dictionary, Name, Pdf
+
+    # Open the PDF file
+    pdf = Pdf.open(input_path)
+
+    # Add PDF/A conformance metadata
+    metadata = {
+        "pdfa_part": "2",
+        "pdfa_conformance": "B",
+        "title": pdf.docinfo.get("/Title", ""),
+        "author": pdf.docinfo.get("/Author", ""),
+        "creator": "PDF Math Translate",
+    }
+
+    with pdf.open_metadata() as meta:
+        meta.load_from_docinfo(pdf.docinfo)
+        meta["pdfaid:part"] = metadata["pdfa_part"]
+        meta["pdfaid:conformance"] = metadata["pdfa_conformance"]
+
+    # Create OutputIntent dictionary
+    output_intent = Dictionary(
+        {
+            "/Type": Name("/OutputIntent"),
+            "/S": Name("/GTS_PDFA1"),
+            "/OutputConditionIdentifier": "sRGB IEC61966-2.1",
+            "/RegistryName": "http://www.color.org",
+            "/Info": "sRGB IEC61966-2.1",
+        }
+    )
+
+    # Add output intent to PDF root
+    if "/OutputIntents" not in pdf.Root:
+        pdf.Root.OutputIntents = [output_intent]
+    else:
+        pdf.Root.OutputIntents.append(output_intent)
+
+    # Save as PDF/A
+    pdf.save(output_path, linearize=True)
+    pdf.close()
+
+
 def translate(
     files: list[str],
     output: str = "",
@@ -254,6 +308,7 @@ def translate(
     vfont: str = "",
     vchar: str = "",
     callback: object = None,
+    compatible: bool = False,
     cancellation_event: asyncio.Event = None,
     **kwarg: Any,
 ):
@@ -276,13 +331,12 @@ def translate(
             try:
                 r = requests.get(file, allow_redirects=True)
                 if r.status_code == 200:
-                    if not os.path.exists("./pdf2zh_files"):
-                        print("Making a temporary dir for downloading PDF files...")
-                        os.mkdir(os.path.dirname("./pdf2zh_files"))
-                    with open("./pdf2zh_files/tmp_download.pdf", "wb") as f:
+                    with tempfile.NamedTemporaryFile(
+                        suffix=".pdf", delete=False
+                    ) as tmp_file:
                         print(f"Writing the file: {file}...")
-                        f.write(r.content)
-                    file = "./pdf2zh_files/tmp_download.pdf"
+                        tmp_file.write(r.content)
+                        file = tmp_file.name
                 else:
                     r.raise_for_status()
             except Exception as e:
@@ -291,10 +345,29 @@ def translate(
                 )
         filename = os.path.splitext(os.path.basename(file))[0]
 
-        doc_raw = open(file, "rb")
+        # If the commandline has specified converting to PDF/A format
+        # --compatible / -cp
+        if compatible:
+            with tempfile.NamedTemporaryFile(
+                suffix="-pdfa.pdf", delete=False
+            ) as tmp_pdfa:
+                print(f"Converting {file} to PDF/A format...")
+                convert_to_pdfa(file, tmp_pdfa.name)
+                doc_raw = open(tmp_pdfa.name, "rb")
+                os.unlink(tmp_pdfa.name)
+        else:
+            doc_raw = open(file, "rb")
         s_raw = doc_raw.read()
+        doc_raw.close()
+
+        if file.startswith(tempfile.gettempdir()):
+            os.unlink(file)
+
         s_mono, s_dual = translate_stream(
-            s_raw, envs=kwarg.get("envs"), prompt=kwarg["prompt"], **locals()
+            s_raw,
+            envs=kwarg.get("envs", {}),
+            prompt=kwarg.get("prompt", []),
+            **locals(),
         )
         file_mono = Path(output) / f"{filename}-mono.pdf"
         file_dual = Path(output) / f"{filename}-dual.pdf"
@@ -302,6 +375,8 @@ def translate(
         doc_dual = open(file_dual, "wb")
         doc_mono.write(s_mono)
         doc_dual.write(s_dual)
+        doc_mono.close()
+        doc_dual.close()
         result_files.append((str(file_mono), str(file_dual)))
 
     return result_files
